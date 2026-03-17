@@ -1,7 +1,7 @@
 # FeatherFace_MM
 
 ## install
-1. git clone https://github.com/dohun-mat/FeatherFace
+1. git clone https://github.com/dohun-mat/FeatherFace_MM
 
 ## data
 1. We also provide the organized dataset we used as in the above directory structure.
