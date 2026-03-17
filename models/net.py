@@ -295,15 +295,6 @@ class MobileMambaModule(torch.nn.Module):
         # drop_prob = 0.1
         self.drop_path = DropPath(drop_prob) if drop_prob > 0. else nn.Identity()
 
-        # # 3. 공간 라우터: 전체 특징을 보고 각 픽셀별 [Global, Local] 확률 생성
-        # # 중간에 채널을 압축하여 핵심 특징만 뽑아낸 뒤 확률을 계산하는 방식
-        # router_hidden = dim // 4
-        # self.router = nn.Sequential(
-        #     nn.Conv2d(dim, router_hidden, kernel_size=1, bias=False),
-        #     nn.BatchNorm2d(router_hidden),
-        #     nn.ReLU(),
-        #     nn.Conv2d(router_hidden, 3, kernel_size=1, bias=False)
-        # )
         self.proj = torch.nn.Sequential(
                         torch.nn.ReLU(), 
                         Conv2d_BN(dim, dim, ks=3, pad=1, groups=dim),
@@ -322,7 +313,6 @@ class MobileMambaModule(torch.nn.Module):
         # 1. 특징 맵 채널 쪼개기
         x_g, x_l, x_id = torch.split(x, [self.global_channels, self.local_channels, self.identity_channels], dim=1)
 
-       # 4. 전문가 연산
         out_g_raw = self.global_expert(x_g)
         out_l_raw = self.local_expert(x_l)
 
@@ -536,117 +526,7 @@ class MaxPool2dStaticSamePadding(nn.Module):
 
         x = self.pool(x)
         return x
-
-def conv_bn(inp, oup, stride = 1, leaky = 0):
-    return nn.Sequential(
-        nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.LeakyReLU(negative_slope=leaky, inplace=True)
-    )
-
-def conv_bn_no_relu(inp, oup, stride):
-    return nn.Sequential(
-        nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
-        nn.BatchNorm2d(oup),
-    )
-
-def m_conv_bn(inp, oup, stride = 1, leaky = 0):
-    return nn.Sequential(
-        nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.LeakyReLU(negative_slope=leaky, inplace=True)        
-    )
-
-def conv_bn1X1(inp, oup, stride, leaky=0):
-    return nn.Sequential(
-        nn.Conv2d(inp, oup, 1, stride, padding=0, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.LeakyReLU(negative_slope=leaky, inplace=True)
-    )
-
-def conv_dw(inp, oup, stride, leaky=0.1):
-    return nn.Sequential(
-        nn.Conv2d(inp, inp, 3, stride, 1, groups=inp, bias=False),
-        nn.BatchNorm2d(inp),
-        nn.LeakyReLU(negative_slope=leaky,inplace=True),
-        
-        nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.LeakyReLU(negative_slope=leaky,inplace=True),
-
-    )
-
-class FPN(nn.Module):
-    def __init__(self,in_channels_list,out_channels):
-        super(FPN,self).__init__()
-        leaky = 0
-        if (out_channels <= 64):
-            leaky = 0.1
-        self.output1 = conv_bn1X1(in_channels_list[0], out_channels, stride = 1, leaky = leaky)
-        self.output2 = conv_bn1X1(in_channels_list[1], out_channels, stride = 1, leaky = leaky)
-        self.output3 = conv_bn1X1(in_channels_list[2], out_channels, stride = 1, leaky = leaky)
-
-        self.merge1 = conv_bn(out_channels, out_channels, leaky = leaky)
-        self.merge2 = conv_bn(out_channels, out_channels, leaky = leaky)
-
-    def forward(self, input):
-        # names = list(input.keys())
-        input = list(input.values())
-
-        output1 = self.output1(input[0])
-        output2 = self.output2(input[1])
-        output3 = self.output3(input[2])
-
-        up3 = F.interpolate(output3, size=[output2.size(2), output2.size(3)], mode="nearest")
-        output2 = output2 + up3
-        output2 = self.merge2(output2)
-
-        up2 = F.interpolate(output2, size=[output1.size(2), output1.size(3)], mode="nearest")
-        output1 = output1 + up2
-        output1 = self.merge1(output1)
-
-        out = [output1, output2, output3]
-        return out
-
-class W_FPN(nn.Module):
-    def __init__(self,in_channels_list,out_channels):
-        super(W_FPN,self).__init__()
-        leaky = 0
-        if (out_channels <= 64):
-            leaky = 0.1
-        self.output1 = conv_bn1X1(in_channels_list[0], out_channels, stride = 1, leaky = leaky)
-        self.output2 = conv_bn1X1(in_channels_list[1], out_channels, stride = 1, leaky = leaky)
-        self.output3 = conv_bn1X1(in_channels_list[2], out_channels, stride = 1, leaky = leaky)
-
-        self.alpha_conv1 = nn.Conv2d(out_channels, 1, kernel_size=1, stride=1)
-        self.alpha_conv2 = nn.Conv2d(out_channels, 1, kernel_size=1, stride=1)
-
-        self.merge1 = conv_bn(out_channels, out_channels, leaky = leaky)
-        self.merge2 = conv_bn(out_channels, out_channels, leaky = leaky)
-
-    def forward(self, input):
-        # names = list(input.keys())
-        input = list(input.values())
-
-        output1 = self.output1(input[0])
-        output2 = self.output2(input[1])
-        output3 = self.output3(input[2])
-
-        up3 = F.interpolate(output3, size=[output2.size(2), output2.size(3)], mode="nearest")
-        alpha_1 = torch.sigmoid(self.alpha_conv1(up3))
-        output2 = output2 * (1-alpha_1) + up3 * alpha_1
-        output2 = self.merge2(output2)
-
-        up2 = F.interpolate(output2, size=[output1.size(2), output1.size(3)], mode="nearest")
-        alpha_2 = torch.sigmoid(self.alpha_conv2(up2))
-        output1 = output1 * (1 - alpha_2) + up2 * alpha_2
-        output1 = self.merge1(output1)
-
-        out = [output1, output2, output3]
-        return out
-
     
-
 class SeparableConvBlock(nn.Module):
     """
     created by Zylo117
@@ -908,48 +788,6 @@ class DeformableConv2d(nn.Module):
                                           dilation=self.dilation)
         return x
 
-
-def ssh_conv_bn(inp, oup, stride = 1, leaky = 0):
-    return nn.Sequential(
-        DeformableConv2d(inp, oup, 3, stride, 1, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.LeakyReLU(negative_slope=leaky, inplace=True)
-    )
-
-def ssh_conv_bn_no_relu(inp, oup, stride):
-    return nn.Sequential(
-        DeformableConv2d(inp, oup, 3, stride, 1, bias=False),
-        nn.BatchNorm2d(oup),
-    )
-
-class SSH(nn.Module):
-    def __init__(self, in_channel, out_channel):
-        super(SSH, self).__init__()
-        assert out_channel % 4 == 0
-        leaky = 0
-        if (out_channel <= 64):
-            leaky = 0.1
-        self.conv3X3 = ssh_conv_bn_no_relu(in_channel, out_channel//2, stride=1)
-
-        self.conv5X5_1 = ssh_conv_bn(in_channel, out_channel//4, stride=1, leaky = leaky)
-        self.conv5X5_2 = ssh_conv_bn_no_relu(out_channel//4, out_channel//4, stride=1)
-
-        self.conv7X7_2 = ssh_conv_bn(out_channel//4, out_channel//4, stride=1, leaky = leaky)
-        self.conv7x7_3 = ssh_conv_bn_no_relu(out_channel//4, out_channel//4, stride=1)
-
-    def forward(self, input):
-        conv3X3 = self.conv3X3(input)
-
-        conv5X5_1 = self.conv5X5_1(input)
-        conv5X5 = self.conv5X5_2(conv5X5_1)
-
-        conv7X7_2 = self.conv7X7_2(conv5X5_1)
-        conv7X7 = self.conv7x7_3(conv7X7_2)
-
-        out = torch.cat([conv3X3, conv5X5, conv7X7], dim=1)
-        out = F.relu(out)
-        return out
-
 def channel_shuffle2(x, groups):
     """
     Channel shuffle operation from 'ShuffleNet: An Extremely Efficient Convolutional Neural Network for Mobile Devices,'
@@ -997,44 +835,6 @@ class ChannelShuffle2(nn.Module):
 
     def forward(self, x):
         return channel_shuffle2(x, self.groups)
-
-
-
-# class MobileNetV1(nn.Module):
-#     def __init__(self):
-#         super(MobileNetV1, self).__init__()
-#         self.stage1 = nn.Sequential(
-#             m_conv_bn(3, 8, 2, leaky = 0.1),    # 3
-#             conv_dw(8, 16, 1),   # 7
-#             conv_dw(16, 32, 2),  # 11
-#             conv_dw(32, 32, 1),  # 19
-#             conv_dw(32, 64, 2),  # 27
-#             conv_dw(64, 64, 1),  # 43
-#         )
-#         self.stage2 = nn.Sequential(
-#             conv_dw(64, 128, 2),  # 43 + 16 = 59
-#             conv_dw(128, 128, 1), # 59 + 32 = 91
-#             conv_dw(128, 128, 1), # 91 + 32 = 123
-#             conv_dw(128, 128, 1), # 123 + 32 = 155
-#             conv_dw(128, 128, 1), # 155 + 32 = 187
-#             conv_dw(128, 128, 1), # 187 + 32 = 219
-#         )
-#         self.stage3 = nn.Sequential(
-#             conv_dw(128, 256, 2), # 219 +3 2 = 241
-#             conv_dw(256, 256, 1), # 241 + 64 = 301
-#         )
-#         self.avg = nn.AdaptiveAvgPool2d((1,1))
-#         self.fc = nn.Linear(256, 1000)
-
-#     def forward(self, x):
-#         x = self.stage1(x)
-#         x = self.stage2(x)
-#         x = self.stage3(x)
-#         x = self.avg(x)
-#         x = self.model(x)
-#         x = x.view(-1, 256)
-#         x = self.fc(x)
-#         return x
     
 class ConvBlock(nn.Module):
     """
