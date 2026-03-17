@@ -20,24 +20,24 @@ Link: from [google cloud](https://drive.google.com/open?id=11UGV3nbVv1x9IC--_tK3
 ps: wider_val.txt only include val file names but not label information.
 
 ## train
-download the pre-trained weights file MobilenetV1X0.25_pretrain.tar for the backbone from this link. [google cloud](https://drive.google.com/open?id=1oZRSG0ZegbVkVwUd8wUIQx8W7yfZ_ki1) 
-```Shell
-  ./weights/
-      mobilenetV1X0.25_pretrain.tar
-```
 1. Before training, you can check network configuration (e.g. batch_size, min_sizes and steps etc..) in
    ```data/config.py and train.py```
 
 2. Train the model using WIDER FACE:
   ```Shell
-   CUDA_VISIBLE_DEVICES=0 torchrun --standalone --nproc_per_node=1 train.py --network mobile0.25
+   CUDA_VISIBLE_DEVICES=2 torchrun --standalone --nproc_per_node=1 train.py --network eresnet
   ```
 
 
-## 평가
+## 평가(두가지 방법 중 하나만)
 1. Generate txt file
 ```Shell
-python test_widerface.py --trained_model ./weights/mobilenet0.25_Final.pth --network mobile0.25 --origin_size True
+원본 이미지만 사용하고 싶을때(빠른 대신 성능 낮음)
+CUDA_VISIBLE_DEVICES=1 python test_widerface.py --trained_model ./weights/eresnet_Final.pth --network eresnet
+
+multi-전략을 사용하고 싶을때(느린 대신 성능 높음)
+CUDA_VISIBLE_DEVICES=1 python test_widerface_multi_scale.py --trained_model ./weights/eresnet_Final.pth --network eresnet --test_scales 0.5 1.0 1.5 2.0 --do_flip
+
 ```
 2. Evaluate txt results. Demo come from [Here](https://github.com/wondervictor/WiderFace-Evaluation)  
 ```Shell
